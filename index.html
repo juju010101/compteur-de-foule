@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Compteur de foule</title>
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#EEF1F4; --ink:#13202B; --muted:#5A6B79; --card:#FFFFFF; --line:#D3DAE0;
+  --in:#0F7B6C; --out:#3B4BA8; --on:#FFFFFF;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#10171D; --ink:#EAF0F4; --muted:#93A4B2; --card:#18222B; --line:#2B3946;
+    --in:#2FB59F; --out:#8C9BF0; --on:#0B1217;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10171D; --ink:#EAF0F4; --muted:#93A4B2; --card:#18222B; --line:#2B3946;
+  --in:#2FB59F; --out:#8C9BF0; --on:#0B1217;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-user-select:none;user-select:none;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+}
+main{
+  height:100%;max-width:520px;margin:0 auto;padding:16px;
+  display:flex;flex-direction:column;gap:14px;
+}
+.readouts{flex:1;display:flex;flex-direction:column;gap:12px;min-height:0}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:16px 20px;display:flex;flex-direction:column;justify-content:center;
+}
+.card.main{flex:2.2;border-width:2px;border-color:var(--ink)}
+.card.sub{flex:1}
+.label{font-size:1rem;color:var(--muted);font-weight:600}
+.num{
+  font-weight:800;font-variant-numeric:tabular-nums;line-height:1;
+  letter-spacing:-0.03em;margin-top:6px;
+}
+.main .num{font-size:clamp(5rem,28vw,9.5rem)}
+.sub .num{font-size:clamp(2.6rem,13vw,4.2rem);color:var(--muted)}
+.peak{margin-top:8px;font-size:.9rem;color:var(--muted)}
+.peak b{color:var(--ink);font-variant-numeric:tabular-nums}
+.pad{display:grid;grid-template-columns:1fr 2fr;gap:12px;height:34%;min-height:150px}
+.pad button{
+  border:0;border-radius:22px;font:inherit;font-weight:800;color:var(--on);
+  font-size:clamp(3rem,16vw,5rem);cursor:pointer;
+  transition:transform .08s ease, filter .08s ease;
+}
+.pad button:active{transform:scale(.96);filter:brightness(1.12)}
+#minus{background:var(--out)}
+#plus{background:var(--in)}
+.tools{display:flex;gap:10px}
+.tools button{
+  flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);
+  background:transparent;color:var(--ink);font:inherit;font-weight:600;cursor:pointer;
+}
+.tools button:disabled{opacity:.4}
+.tools button.armed{background:var(--out);color:var(--on);border-color:var(--out)}
+button:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){.pad button{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <section class="readouts" aria-live="polite">
+    <div class="card main">
+      <div class="label">Présents maintenant</div>
+      <div class="num" id="current">0</div>
+    </div>
+    <div class="card sub">
+      <div class="label">Total des entrées</div>
+      <div class="num" id="total">0</div>
+      <div class="peak">Pic maximum : <b id="peak">0</b></div>
+    </div>
+  </section>
+
+  <section class="pad">
+    <button id="minus" aria-label="Une personne sort">−</button>
+    <button id="plus" aria-label="Une personne entre">+</button>
+  </section>
+
+  <section class="tools">
+    <button id="undo">Annuler le dernier</button>
+    <button id="reset">Remettre à zéro</button>
+  </section>
+</main>
+
+<script>
+(function(){
+  var KEY="compteur-foule-v1";
+  // history: {t:"in"|"out", p: pic avant l'action}
+  var state={current:0,total:0,peak:0,history:[]};
+
+  try{
+    var saved=JSON.parse(localStorage.getItem(KEY)||"null");
+    if(saved&&typeof saved.current==="number"&&typeof saved.total==="number"){
+      state=saved;
+      if(typeof state.peak!=="number") state.peak=state.current;
+      if(!Array.isArray(state.history)) state.history=[];
+      state.history=state.history.map(function(h){
+        return typeof h==="string"?{t:h,p:state.peak}:h;
+      });
+    }
+  }catch(e){}
+
+  var elCur=document.getElementById("current");
+  var elTot=document.getElementById("total");
+  var elPeak=document.getElementById("peak");
+  var btnUndo=document.getElementById("undo");
+  var btnReset=document.getElementById("reset");
+
+  function save(){ try{ localStorage.setItem(KEY,JSON.stringify(state)); }catch(e){} }
+  function buzz(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(e){} }
+
+  function render(){
+    elCur.textContent=state.current;
+    elTot.textContent=state.total;
+    elPeak.textContent=state.peak;
+    btnUndo.disabled=state.history.length===0;
+    save();
+  }
+
+  function add(){
+    state.history.push({t:"in",p:state.peak});
+    state.current++; state.total++;
+    if(state.current>state.peak) state.peak=state.current;
+    trim(); buzz(15); render();
+  }
+  function remove(){
+    if(state.current<=0){ buzz([30,40,30]); return; }
+    state.history.push({t:"out",p:state.peak});
+    state.current--;
+    trim(); buzz(15); render();
+  }
+  function trim(){ if(state.history.length>500) state.history.shift(); }
+
+  function undo(){
+    var last=state.history.pop();
+    if(!last) return;
+    if(last.t==="in"){ state.current=Math.max(0,state.current-1); state.total=Math.max(0,state.total-1); }
+    else{ state.current++; }
+    state.peak=last.p;
+    render();
+  }
+
+  var armTimer=null;
+  function reset(){
+    if(!btnReset.classList.contains("armed")){
+      btnReset.classList.add("armed");
+      btnReset.textContent="Confirmer la remise à zéro";
+      armTimer=setTimeout(disarm,3000);
+      return;
+    }
+    clearTimeout(armTimer); disarm();
+    state={current:0,total:0,peak:0,history:[]}; render();
+  }
+  function disarm(){
+    btnReset.classList.remove("armed");
+    btnReset.textContent="Remettre à zéro";
+  }
+
+  document.getElementById("plus").addEventListener("click",add);
+  document.getElementById("minus").addEventListener("click",remove);
+  btnUndo.addEventListener("click",undo);
+  btnReset.addEventListener("click",reset);
+
+  render();
+})();
+</script>
+</body>
+</html>
